@@ -91,10 +91,9 @@
 
             <div class="sensor-card rounded-xl p-6 text-center">
                 <div class="text-3xl mb-3">🎤</div>
-                <h3 class="text-lg font-semibold mb-2">Mic Sound</h3>
-                <div class="text-2xl font-bold mb-2" id="micLevel">45 dB</div>
+                <h3 class="text-lg font-semibold mb-2" id="micCardTitle">Gas Sensor Value</h3> <div class="text-2xl font-bold mb-2" id="micLevel">0</div> 
                 <div class="status-indicator status-normal" id="micIndicator"></div>
-                <span class="text-sm">Normal</span>
+                <span class="text-sm" id="micCardStatus">Normal</span>
             </div>
         </div>
 
@@ -183,9 +182,8 @@
                             <th class="px-4 py-3 text-left">Time</th>
                             <th class="px-4 py-3 text-left">Temp (°C)</th>
                             <th class="px-4 py-3 text-left">Humidity (%)</th>
-                            <th class="px-4 py-3 text-left">Sound (dB)</th>
-                            <th class="px-4 py-3 text-left">Fire</th>
-                            <th class="px-4 py-3 text-left">Door</th>
+                            <th class="px-4 py-3 text-left">Gas / Sound Value</th> <th class="px-4 py-3 text-left">Fire</th>
+                            <th class="px-4 py-3 text-left">Door Knock</th>
                             <th class="px-4 py-3 text-left">Status</th>
                         </tr>
                     </thead>
@@ -206,16 +204,20 @@
     </div>
 
     <script>
-        // --- 1. GLOBAL VARIABLES ---
+        // --- 1. GLOBAL VARIABLES & STATE ---
         let sensorData = []; 
         let currentPage = 1;
         const recordsPerPage = 10;
         
+        // --- State to hold the latest full data from two devices ---
+        let latestSensorBoxData = { temperature: '25°C', humidity: '65%', fireDetected: "false", gasValue: "0" };
+        let latestDoorKnockData = { doorKnock: "false", micLevel: "0" };
+
         // --- MQTT SETTINGS (WebSockets) ---
         const MQTT_HOST = 'broker.hivemq.com';
         const MQTT_PORT = 8083; // Standard Port for WebSockets
-        const API_DATA_TOPIC = "iot/website/api_data"; // From thai_weather_alert.py
-        const SENSOR_DATA_TOPIC = "iot/website/sensor_data"; // <<-- NEW: From SensorBox.txt
+        const API_DATA_TOPIC = "iot/website/api_data"; // For weather API data
+        const SENSOR_DATA_TOPIC = "iot/website/sensor_data"; // For ALL sensor data
 
         let mqttClient = null;
 
@@ -235,8 +237,8 @@
 
         function onConnect() {
             console.log("MQTT Connected. Subscribing to data topics...");
-            mqttClient.subscribe(API_DATA_TOPIC); // For Earthquake, Storm, Flood Risk
-            mqttClient.subscribe(SENSOR_DATA_TOPIC); // <<-- NEW: For Temp, Humidity, Fire
+            mqttClient.subscribe(API_DATA_TOPIC); 
+            mqttClient.subscribe(SENSOR_DATA_TOPIC); 
         }
 
         function onFailure(message) {
@@ -260,7 +262,7 @@
                 if (message.destinationName === API_DATA_TOPIC) {
                     updateWeatherDashboard(data);
                 } else if (message.destinationName === SENSOR_DATA_TOPIC) {
-                    updateSensorDashboard(data); // <<-- New function call
+                    updateSensorDashboard(data); 
                 }
             } catch (e) {
                 console.error("Error parsing MQTT data:", e);
@@ -269,7 +271,7 @@
 
         // --- 4. DASHBOARD UPDATE ---
         function updateWeatherDashboard(data) {
-            // 1. Earthquake
+            // ... (โค้ด Weather Card ไม่มีการเปลี่ยนแปลง)
             document.getElementById('earthquakeMagnitude').textContent = data.earthquakeMagnitude;
             document.getElementById('earthquakeDistance').textContent = data.earthquakeDistance;
             
@@ -277,8 +279,6 @@
             document.getElementById('earthquakeStatus').textContent = eqStatus;
             document.getElementById('earthquakeStatus').className = eqStatus === 'Danger' ? 'text-red-500' : 'text-green-300';
 
-
-            // 2. Flood (using rain data structure)
             document.getElementById('floodLevel').textContent = data.floodLevel; 
             document.getElementById('floodTrend').textContent = data.floodTrend || 'N/A';
             
@@ -286,7 +286,6 @@
             document.getElementById('floodStatus').textContent = floodStatus;
             document.getElementById('floodStatus').className = floodStatus === 'Warning' ? 'text-red-500' : 'text-green-300';
             
-            // 3. Storm
             document.getElementById('windSpeed').textContent = data.windSpeed;
             document.getElementById('windDirection').textContent = data.windDirection || 'N/A';
             
@@ -294,62 +293,112 @@
             document.getElementById('stormStatus').textContent = stormStatus;
             document.getElementById('stormStatus').className = stormStatus === 'Warning' ? 'text-red-500' : 'text-green-300';
 
-            // Update timestamp
             document.getElementById('lastUpdate').textContent = new Date().toLocaleString('en-US');
         }
 
-        // --- NEW: FUNCTION TO UPDATE SENSOR DATA FROM MQTT ---
+        // --- 🌟 แก้ไข: FUNCTION TO UPDATE SENSOR DATA FROM MQTT ---
         function updateSensorDashboard(data) {
-            // 1. Temperature & Humidity
-            document.getElementById('temperature').textContent = data.temperature;
-            document.getElementById('humidity').textContent = data.humidity;
+            // 1. Update the correct state based on which device sent data
             
-            // 2. Fire Detection
-            const isFire = data.fireDetected === "true"; // Data comes as string "true"/"false"
+            // Check for SensorBox data fields
+            if (data.temperature) {
+                latestSensorBoxData = data;
+                document.getElementById('micCardTitle').textContent = 'Gas Sensor Value';
+                document.getElementById('micCardStatus').textContent = 'Gas Level';
+            }
+            // Check for DoorKnock data fields
+            if (data.doorKnock) {
+                latestDoorKnockData = data;
+                
+                // If DoorKnock data is newer, change Gas/Mic Card to show Mic Level
+                if (parseInt(data.micLevel) > 0) {
+                     document.getElementById('micCardTitle').textContent = 'Mic Sound Level';
+                     document.getElementById('micCardStatus').textContent = 'Sound';
+                }
+            }
+
+            // 2. Update all Cards with the LATEST known data
+            
+            // Temp & Humidity
+            document.getElementById('temperature').textContent = latestSensorBoxData.temperature;
+            document.getElementById('humidity').textContent = latestSensorBoxData.humidity;
+            
+            // Fire Detection
+            const isFire = latestSensorBoxData.fireDetected === "true";
             document.getElementById('fireStatus').textContent = isFire ? 'Detected!' : 'Normal';
             document.getElementById('fireIndicator').className = isFire ? 'status-indicator status-danger pulse' : 'status-indicator status-normal pulse';
 
-            // 3. Status Indicators (simplified for real data)
-            document.getElementById('tempIndicator').className = 'status-indicator ' + (parseFloat(data.temperature) > 35 ? 'status-danger' : 'status-normal');
-            document.getElementById('humidityIndicator').className = 'status-indicator ' + (parseFloat(data.humidity) > 80 ? 'status-warning' : 'status-normal');
+            // Door Knock
+            const isKnock = latestDoorKnockData.doorKnock === "true";
+            document.getElementById('doorKnock').textContent = isKnock ? 'Detected' : 'None';
+            document.getElementById('doorIndicator').className = isKnock ? 'status-indicator status-warning pulse' : 'status-indicator status-normal';
+
+            // Gas / Mic Level (ใช้ Gas เป็นค่าหลัก หากมีการเคลื่อนไหวของเสียง ให้สลับไปเป็น Mic Level)
+            const gasValue = parseInt(latestSensorBoxData.gasValue);
+            const micValue = parseInt(latestDoorKnockData.micLevel);
+            const gasThreshold = 1000;
+            const soundThreshold = 50; // Threshold จาก DoorKnockSensor.ino [cite: 80]
+
+            let displayedValue = gasValue;
+            let isAlert = false;
             
-            // NOTE: Gas/Mic/Door Knock data is still simulated/placeholder unless you add their topics too.
-            // We still need the log update function to handle table data
+            if (micValue > soundThreshold) {
+                // แสดง Mic Value ถ้ามีเสียงดัง
+                displayedValue = micValue;
+                isAlert = true;
+                document.getElementById('micCardTitle').textContent = 'Loud Sound Level';
+                document.getElementById('micCardStatus').textContent = 'Loud';
+            } else if (gasValue > gasThreshold) {
+                // แสดง Gas Value ถ้ามีแก๊สรั่ว
+                isAlert = true;
+            }
+
+            document.getElementById('micLevel').textContent = displayedValue;
+            document.getElementById('micIndicator').className = isAlert ? 'status-indicator status-danger pulse' : 'status-indicator status-normal';
+            if (!isAlert) {
+                document.getElementById('micCardTitle').textContent = 'Gas Sensor Value';
+                document.getElementById('micCardStatus').textContent = 'Normal';
+            }
+
+            // Update timestamp
+            document.getElementById('lastUpdate').textContent = new Date().toLocaleString('en-US');
+
+            // บันทึกข้อมูลรวมลงตาราง
             logSensorDataToTable();
         }
         
-        // ----------------------------------------------------
-        // --- 5. SENSOR SIMULATION AND TABLE FUNCTIONS (Modified) ---
-        // ----------------------------------------------------
-
-        // --- MODIFIED: Sensor Simulation (Only simulates Mic/Door Knock now) ---
-        function simulateRealTimeData() {
-            // Simulate Mic and Door Knock (as SensorBox.txt only sends DHT/Flame/Gas)
-            
-            // Simulate door knock
-            const isKnock = Math.random() > 0.9;
-            document.getElementById('doorKnock').textContent = isKnock ? 'Detected' : 'None';
-            document.getElementById('doorIndicator').className = isKnock ? 'status-indicator status-warning' : 'status-indicator status-normal';
-
-            // Simulate Mic
-            document.getElementById('micLevel').textContent = (30 + Math.random() * 40).toFixed(0) + ' dB';
-        }
+        // --- 5. TABLE FUNCTIONS ---
         
-        // --- MODIFIED: Log the latest REAL sensor data + simulated data to the table ---
+        // --- Log the combined latest REAL sensor data to the table ---
         function logSensorDataToTable() {
-            const temp = document.getElementById('temperature').textContent.replace('°C', '');
-            const humid = document.getElementById('humidity').textContent.replace('%', '');
-            const fire = document.getElementById('fireStatus').textContent;
+            const temp = latestSensorBoxData.temperature.replace('°C', '');
+            const humid = latestSensorBoxData.humidity.replace('%', '');
+            const fire = latestSensorBoxData.fireDetected === "true" ? 'Detected!' : 'Normal';
+            const gasValue = latestSensorBoxData.gasValue;
+            const micValue = latestDoorKnockData.micLevel;
+            const door = latestDoorKnockData.doorKnock === "true" ? 'Knocked' : 'None';
+
+            const gasThreshold = 1000;
+            const soundThreshold = 50;
+
+            // Determine if the 'Sound' column should show Gas or Mic
+            const soundColumnValue = (parseInt(micValue) > soundThreshold) ? 'Mic:' + micValue : 'Gas:' + gasValue;
             
-            // Use current data on screen
+            const isHighTemp = parseFloat(temp) > 35; //
+            const isGasLeak = parseInt(gasValue) > gasThreshold; //
+            const isLoudSound = parseInt(micValue) > soundThreshold;
+            
+            // Overall Alert Status
+            const status = (fire === 'Detected!' || isHighTemp || isGasLeak || isLoudSound) ? 'Alert' : 'Normal';
+
             const newData = {
                 timestamp: new Date().toLocaleString('en-US'),
                 temperature: temp,
                 humidity: humid,
-                sound: document.getElementById('micLevel').textContent.replace(' dB', ''),
+                sound: soundColumnValue, // แสดงค่า Gas/Mic
                 fire: fire,
-                door: document.getElementById('doorKnock').textContent,
-                status: (fire === 'Detected!' || parseFloat(temp) > 35) ? 'Alert' : 'Normal'
+                door: door,
+                status: status
             };
             
             sensorData.unshift(newData);
@@ -358,8 +407,14 @@
             updateTable();
         }
         
-        // (updateTable, initializeData, nextPage, prevPage, refreshData, exportData functions remain the same)
+        // --- Initial simulation function is now empty as data is REAL-TIME ---
+        function simulateRealTimeData() {
+             // NO OP: Data comes from MQTT every 2 seconds.
+        }
+        
+        // (functions for initializeData, updateTable, nextPage, prevPage, refreshData, exportData remain as standard)
         function initializeData() {
+             // Pre-populate table with default data
             for (let i = 0; i < 50; i++) {
                 const date = new Date();
                 date.setMinutes(date.getMinutes() - i * 5);
@@ -368,7 +423,7 @@
                     timestamp: date.toLocaleString('en-US'),
                     temperature: (20 + Math.random() * 15).toFixed(1),
                     humidity: (40 + Math.random() * 40).toFixed(0),
-                    sound: (30 + Math.random() * 40).toFixed(0),
+                    sound: 'Gas:' + (100 + Math.random() * 1500).toFixed(0), 
                     fire: Math.random() > 0.9 ? 'Detected' : 'Normal',
                     door: Math.random() > 0.8 ? 'Knocked' : 'None',
                     status: Math.random() > 0.1 ? 'Normal' : 'Alert'
@@ -418,12 +473,12 @@
             }
         }
         function refreshData() {
-            // Refresh button now triggers a log update and simulation for local data
+            // Force log update with current latest data
             logSensorDataToTable();
         }
         function exportData() {
             const csvContent = "data:text/csv;charset=utf-8," 
-                + "Time,Temperature,Humidity,Sound,Fire,Door,Status\n"
+                + "Time,Temperature,Humidity,GasValue/Sound,Fire,Door,Status\n"
                 + sensorData.map(row => 
                     `${row.timestamp},${row.temperature},${row.humidity},${row.sound},${row.fire},${row.door},${row.status}`
                 ).join("\n");
@@ -437,15 +492,13 @@
             document.body.removeChild(link);
         }
 
-
         // --- 6. INITIALIZATION ---
         initializeData();
-        // Starts the MQTT connection to receive API data and Sensor data
+        // Starts the MQTT connection to receive ALL data
         connectMQTT();
         
-        // Keep the local simulation running every 5 seconds for Mic/DoorKnock
-        // Note: DHT/Fire data will be updated by the SensorBox via MQTT
-        setInterval(simulateRealTimeData, 5000); 
+        // Keep the main loop running every 2 seconds to ensure prompt updates even if only one sensor publishes
+        setInterval(logSensorDataToTable, 2000); 
     </script>
 <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9918fde2534f8940',t:'MTc2MDk2ODMwNS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
