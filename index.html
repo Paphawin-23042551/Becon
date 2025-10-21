@@ -214,7 +214,8 @@
         // --- MQTT SETTINGS (WebSockets) ---
         const MQTT_HOST = 'broker.hivemq.com';
         const MQTT_PORT = 8083; // Standard Port for WebSockets
-        const API_DATA_TOPIC = "iot/website/api_data"; // Topic where thai_weather_alert.py publishes
+        const API_DATA_TOPIC = "iot/website/api_data"; // From thai_weather_alert.py
+        const SENSOR_DATA_TOPIC = "iot/website/sensor_data"; // <<-- NEW: From SensorBox.txt
 
         let mqttClient = null;
 
@@ -229,12 +230,13 @@
                 onFailure: onFailure
             };
             mqttClient.connect(options);
-            console.log("Attempting MQTT connection to API data...");
+            console.log("Attempting MQTT connection to Dashboard...");
         }
 
         function onConnect() {
-            console.log("MQTT Connected. Subscribing to API data...");
-            mqttClient.subscribe(API_DATA_TOPIC);
+            console.log("MQTT Connected. Subscribing to data topics...");
+            mqttClient.subscribe(API_DATA_TOPIC); // For Earthquake, Storm, Flood Risk
+            mqttClient.subscribe(SENSOR_DATA_TOPIC); // <<-- NEW: For Temp, Humidity, Fire
         }
 
         function onFailure(message) {
@@ -249,18 +251,19 @@
             }
         }
 
-        // --- 3. DATA PROCESSING: RECEIVES DATA FROM PYTHON SCRIPT (thai_weather_alert.py) ---
+        // --- 3. DATA PROCESSING: RECEIVES DATA ---
         function onMessageArrived(message) {
-            if (message.destinationName === API_DATA_TOPIC) {
-                try {
-                    const data = JSON.parse(message.payloadString);
-                    console.log("Received API Data:", data);
-                    
+            try {
+                const data = JSON.parse(message.payloadString);
+                console.log(`Received Data on ${message.destinationName}:`, data);
+
+                if (message.destinationName === API_DATA_TOPIC) {
                     updateWeatherDashboard(data);
-                    
-                } catch (e) {
-                    console.error("Error parsing API data:", e);
+                } else if (message.destinationName === SENSOR_DATA_TOPIC) {
+                    updateSensorDashboard(data); // <<-- New function call
                 }
+            } catch (e) {
+                console.error("Error parsing MQTT data:", e);
             }
         }
 
@@ -270,7 +273,6 @@
             document.getElementById('earthquakeMagnitude').textContent = data.earthquakeMagnitude;
             document.getElementById('earthquakeDistance').textContent = data.earthquakeDistance;
             
-            // Set Status Text and Color
             const eqStatus = data.earthquakeStatus === 'อันตราย' ? 'Danger' : 'Safe';
             document.getElementById('earthquakeStatus').textContent = eqStatus;
             document.getElementById('earthquakeStatus').className = eqStatus === 'Danger' ? 'text-red-500' : 'text-green-300';
@@ -295,41 +297,59 @@
             // Update timestamp
             document.getElementById('lastUpdate').textContent = new Date().toLocaleString('en-US');
         }
-        
-        // ----------------------------------------------------
-        // --- 5. SENSOR SIMULATION AND TABLE FUNCTIONS (For demo) ---
-        // ----------------------------------------------------
 
-        // --- Sensor Simulation (Modified to ONLY update Sensor Data) ---
-        function simulateRealTimeData() {
-            // Update sensor displays (Still simulates DHT/MIC/Knock data)
-            document.getElementById('temperature').textContent = (20 + Math.random() * 15).toFixed(1) + '°C';
-            document.getElementById('humidity').textContent = (40 + Math.random() * 40).toFixed(0) + '%';
-            document.getElementById('micLevel').textContent = (30 + Math.random() * 40).toFixed(0) + ' dB';
+        // --- NEW: FUNCTION TO UPDATE SENSOR DATA FROM MQTT ---
+        function updateSensorDashboard(data) {
+            // 1. Temperature & Humidity
+            document.getElementById('temperature').textContent = data.temperature;
+            document.getElementById('humidity').textContent = data.humidity;
             
-            // Simulate fire detection
-            const isFire = Math.random() > 0.95;
+            // 2. Fire Detection
+            const isFire = data.fireDetected === "true"; // Data comes as string "true"/"false"
             document.getElementById('fireStatus').textContent = isFire ? 'Detected!' : 'Normal';
             document.getElementById('fireIndicator').className = isFire ? 'status-indicator status-danger pulse' : 'status-indicator status-normal pulse';
+
+            // 3. Status Indicators (simplified for real data)
+            document.getElementById('tempIndicator').className = 'status-indicator ' + (parseFloat(data.temperature) > 35 ? 'status-danger' : 'status-normal');
+            document.getElementById('humidityIndicator').className = 'status-indicator ' + (parseFloat(data.humidity) > 80 ? 'status-warning' : 'status-normal');
+            
+            // NOTE: Gas/Mic/Door Knock data is still simulated/placeholder unless you add their topics too.
+            // We still need the log update function to handle table data
+            logSensorDataToTable();
+        }
+        
+        // ----------------------------------------------------
+        // --- 5. SENSOR SIMULATION AND TABLE FUNCTIONS (Modified) ---
+        // ----------------------------------------------------
+
+        // --- MODIFIED: Sensor Simulation (Only simulates Mic/Door Knock now) ---
+        function simulateRealTimeData() {
+            // Simulate Mic and Door Knock (as SensorBox.txt only sends DHT/Flame/Gas)
             
             // Simulate door knock
             const isKnock = Math.random() > 0.9;
             document.getElementById('doorKnock').textContent = isKnock ? 'Detected' : 'None';
             document.getElementById('doorIndicator').className = isKnock ? 'status-indicator status-warning' : 'status-indicator status-normal';
 
-            // Add new data to table
-            const tableFireStatus = isFire ? 'Detected' : 'Normal';
-            const tableDoorStatus = isKnock ? 'Knocked' : 'None';
-            const tableOverallStatus = Math.random() > 0.1 ? 'Normal' : 'Alert';
+            // Simulate Mic
+            document.getElementById('micLevel').textContent = (30 + Math.random() * 40).toFixed(0) + ' dB';
+        }
+        
+        // --- MODIFIED: Log the latest REAL sensor data + simulated data to the table ---
+        function logSensorDataToTable() {
+            const temp = document.getElementById('temperature').textContent.replace('°C', '');
+            const humid = document.getElementById('humidity').textContent.replace('%', '');
+            const fire = document.getElementById('fireStatus').textContent;
             
+            // Use current data on screen
             const newData = {
                 timestamp: new Date().toLocaleString('en-US'),
-                temperature: document.getElementById('temperature').textContent.replace('°C', ''),
-                humidity: document.getElementById('humidity').textContent.replace('%', ''),
+                temperature: temp,
+                humidity: humid,
                 sound: document.getElementById('micLevel').textContent.replace(' dB', ''),
-                fire: tableFireStatus,
-                door: tableDoorStatus,
-                status: tableOverallStatus
+                fire: fire,
+                door: document.getElementById('doorKnock').textContent,
+                status: (fire === 'Detected!' || parseFloat(temp) > 35) ? 'Alert' : 'Normal'
             };
             
             sensorData.unshift(newData);
@@ -338,7 +358,7 @@
             updateTable();
         }
         
-        // (Table and Navigation Functions)
+        // (updateTable, initializeData, nextPage, prevPage, refreshData, exportData functions remain the same)
         function initializeData() {
             for (let i = 0; i < 50; i++) {
                 const date = new Date();
@@ -398,7 +418,8 @@
             }
         }
         function refreshData() {
-            simulateRealTimeData();
+            // Refresh button now triggers a log update and simulation for local data
+            logSensorDataToTable();
         }
         function exportData() {
             const csvContent = "data:text/csv;charset=utf-8," 
@@ -419,10 +440,11 @@
 
         // --- 6. INITIALIZATION ---
         initializeData();
-        // Starts the MQTT connection to receive API data
+        // Starts the MQTT connection to receive API data and Sensor data
         connectMQTT();
         
-        // Keep the sensor simulation running every 5 seconds
+        // Keep the local simulation running every 5 seconds for Mic/DoorKnock
+        // Note: DHT/Fire data will be updated by the SensorBox via MQTT
         setInterval(simulateRealTimeData, 5000); 
     </script>
 <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9918fde2534f8940',t:'MTc2MDk2ODMwNS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
